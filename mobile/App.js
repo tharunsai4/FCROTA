@@ -105,6 +105,8 @@ export default function App() {
 
   const [stores, setStores] = useState([]);
   const [employees, setEmployees] = useState([]);
+  const [employeeStoreFilter, setEmployeeStoreFilter] = useState("");
+  const [shopFilterOpen, setShopFilterOpen] = useState(false);
 
   const [loginForm, setLoginForm] = useState(initialLogin);
   const [signupForm, setSignupForm] = useState(initialSignup);
@@ -399,6 +401,81 @@ export default function App() {
     () => employees.filter((employee) => employee.role === "STAFF"),
     [employees]
   );
+  const storeNameById = useMemo(() => {
+    const map = {};
+    stores.forEach((store) => {
+      if (store?._id) map[store._id] = store.name || "Unnamed store";
+    });
+    return map;
+  }, [stores]);
+  const storeIdByName = useMemo(() => {
+    const map = {};
+    stores.forEach((store) => {
+      if (store?.name && store?._id) {
+        map[store.name] = store._id;
+      }
+    });
+    return map;
+  }, [stores]);
+
+  const getEmployeeStoreLabel = (employee) => {
+    if (Array.isArray(employee?.storeNames) && employee.storeNames.length > 0) {
+      return employee.storeNames.join(", ");
+    }
+    const rawIds =
+      employee?.storeIds ??
+      employee?.stores ??
+      employee?.storeId ??
+      employee?.store;
+    const ids = Array.isArray(rawIds) ? rawIds : rawIds ? [rawIds] : [];
+    const names = ids
+      .map((value) => {
+        if (!value) return null;
+        if (typeof value === "string") return storeNameById[value];
+        if (typeof value === "object") {
+          if (value.name) return value.name;
+          if (value._id) return storeNameById[value._id];
+        }
+        return null;
+      })
+      .filter(Boolean);
+    return names.length > 0 ? names.join(", ") : "None";
+  };
+  const selectedShopLabel = employeeStoreFilter
+    ? storeNameById[employeeStoreFilter] || "Selected shop"
+    : "All shops";
+
+  const getEmployeeStoreIds = (employee) => {
+    const rawIds =
+      employee?.storeIds ??
+      employee?.stores ??
+      employee?.storeId ??
+      employee?.store;
+    const ids = Array.isArray(rawIds) ? rawIds : rawIds ? [rawIds] : [];
+    const normalized = ids
+      .map((value) => {
+        if (!value) return null;
+        if (typeof value === "string") return value;
+        if (typeof value === "object") return value._id || null;
+        return null;
+      })
+      .filter(Boolean);
+    if (normalized.length > 0) return normalized;
+    if (Array.isArray(employee?.storeNames) && employee.storeNames.length > 0) {
+      return employee.storeNames
+        .map((name) => storeIdByName[name])
+        .filter(Boolean);
+    }
+    return [];
+  };
+
+  const filteredEmployees = useMemo(() => {
+    if (!employeeStoreFilter) return employees;
+    return employees.filter((employee) => {
+      const ids = getEmployeeStoreIds(employee);
+      return ids.includes(employeeStoreFilter);
+    });
+  }, [employees, employeeStoreFilter, storeIdByName]);
 
   if (!token) {
     return (
@@ -561,7 +638,12 @@ export default function App() {
   }
 
   return (
-    <View style={styles.appWrap}>
+    <ImageBackground
+      source={require("./assets/logo.png")}
+      style={styles.authBackground}
+      resizeMode="contain"
+    >
+      <View style={styles.appWrap}>
       <View style={styles.header}>
         <View>
           <Image
@@ -634,7 +716,19 @@ export default function App() {
               <View style={styles.profileRow}>
                 <Badge label={profile?.role || ""} />
                 <Text style={styles.profileMeta}>{profile?.phone || ""}</Text>
+                <View style={styles.profileRow}>
+                <Text
+                  style={
+                    profile?.isActive === false
+                      ? styles.statusInactive
+                      : styles.statusActive
+                  }
+                >
+                  {profile?.isActive === false ? "Inactive" : "Active"}
+                </Text>
               </View>
+              </View>
+              
               <Text style={styles.profileMeta}>Stores</Text>
               <Text style={styles.profileStores}>
                 {Array.isArray(profile?.storeNames) &&
@@ -718,7 +812,7 @@ export default function App() {
           </Section>
         )}
 
-        {activeNav === "everyone" && !isStaffOnly && canManageEmployees && (
+        {/* {activeNav === "everyone" && !isStaffOnly && canManageEmployees && (
           <Section title="Create employee">
             <View style={styles.card}>
               <Field
@@ -791,8 +885,82 @@ export default function App() {
               </Pressable>
             </View>
           </Section>
-        )}
+        )} */}
 
+        {activeNav === "everyone" && !isStaffOnly && (
+          <Section title="Employee List">
+            <Text style={styles.label}>Filter by shop</Text>
+            <View style={styles.dropdown}>
+              <Pressable
+                style={styles.dropdownHeader}
+                onPress={() => setShopFilterOpen((prev) => !prev)}
+              >
+                <Text style={styles.dropdownHeaderText}>
+                  {selectedShopLabel}
+                </Text>
+                <Text style={styles.dropdownChevron}>
+                  {shopFilterOpen ? "^" : "v"}
+                </Text>
+              </Pressable>
+              {shopFilterOpen && (
+                <View style={styles.dropdownList}>
+                  <Pressable
+                    style={styles.dropdownItem}
+                    onPress={() => {
+                      setEmployeeStoreFilter("");
+                      setShopFilterOpen(false);
+                    }}
+                  >
+                    <Text style={styles.dropdownItemText}>All shops</Text>
+                  </Pressable>
+                  {storeOptions.map((store) => (
+                    <Pressable
+                      key={store._id}
+                      style={styles.dropdownItem}
+                      onPress={() => {
+                        setEmployeeStoreFilter(store._id);
+                        setShopFilterOpen(false);
+                      }}
+                    >
+                      <Text style={styles.dropdownItemText}>{store.name}</Text>
+                    </Pressable>
+                  ))}
+                </View>
+              )}
+            </View>
+            <View style={styles.table}>
+              <View style={[styles.tableRow, styles.tableHeaderRow]}>
+                <Text style={[styles.tableHeaderText, styles.tableCellName]}>
+                  Name
+                </Text>
+                <Text style={[styles.tableHeaderText, styles.tableCellShops]}>
+                  Shops
+                </Text>
+              </View>
+              {filteredEmployees.length === 0 ? (
+                <View style={styles.tableRow}>
+                  <Text style={styles.tableCell}>
+                    {employeeStoreFilter
+                      ? "No employees for selected shop(s)"
+                      : "No employees found"}
+                  </Text>
+                </View>
+              ) : (
+                filteredEmployees.map((employee) => (
+                  <View key={employee._id} style={styles.tableRow}>
+                    <Text style={[styles.tableCell, styles.tableCellName]}>
+                      {employee.fullName}
+                    </Text>
+                    <Text style={[styles.tableCell, styles.tableCellShops]}>
+                      {getEmployeeStoreLabel(employee)}
+                    </Text>
+                  </View>
+                ))
+              )}
+            </View>
+          </Section>
+        )}
+        
         {activeNav === "everyone" && !isStaffOnly && canManageEmployees && (
           <Section title="Assign stores">
             <View style={styles.card}>
@@ -850,24 +1018,7 @@ export default function App() {
           </Section>
         )}
 
-        {activeNav === "everyone" && !isStaffOnly && (
-          <Section title="Employees">
-            <FlatList
-              data={employees}
-              scrollEnabled={false}
-              keyExtractor={(item) => item._id}
-              renderItem={({ item }) => (
-                <View style={styles.listItem}>
-                  <Text style={styles.listTitle}>{item.fullName}</Text>
-                  <Text style={styles.listMeta}>{item.email || "No email"}</Text>
-                  <Text style={styles.listMeta}>
-                    {item.role} · {item.storeNames?.join(", ") || "No stores"}
-                  </Text>
-                </View>
-              )}
-            />
-          </Section>
-        )}
+        
 
         {activeNav === "staff" && role === "DIRECTOR" && (
           <Section title="Staff">
@@ -951,7 +1102,8 @@ export default function App() {
           </Section>
         )}
       </ScrollView>
-    </View>
+      </View>
+    </ImageBackground>
   );
 }
 
@@ -982,9 +1134,16 @@ const styles = StyleSheet.create({
     paddingTop: 64,
     gap: 16,
   },
-  appWrap: {
+  appBackground: {
     flex: 1,
     backgroundColor: "#ffffff",
+  },
+  appBackgroundImage: {
+    opacity: 0.08,
+  },
+  appWrap: {
+    flex: 1,
+    backgroundColor: "rgba(255, 255, 255, 0.92)",
   },
   body: {
     padding: 20,
@@ -1204,10 +1363,19 @@ const styles = StyleSheet.create({
   profileRow: {
     flexDirection: "row",
     alignItems: "center",
+    justifyContent: "space-between",
     gap: 8,
   },
   profileStores: {
     color: "#111827",
+  },
+  statusActive: {
+    color: "#16a34a",
+    fontWeight: "700",
+  },
+  statusInactive: {
+    color: "#b91c1c",
+    fontWeight: "700",
   },
   multiSelect: {
     gap: 8,
@@ -1231,6 +1399,43 @@ const styles = StyleSheet.create({
   },
   selectMeta: {
     color: "#4b5563",
+  },
+  dropdown: {
+    borderWidth: 1,
+    borderColor: "#d1d5db",
+    borderRadius: 12,
+    backgroundColor: "#ffffff",
+    overflow: "hidden",
+  },
+  dropdownHeader: {
+    paddingVertical: 12,
+    paddingHorizontal: 14,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    backgroundColor: "#f9fafb",
+  },
+  dropdownHeaderText: {
+    color: "#111827",
+    fontWeight: "600",
+  },
+  dropdownChevron: {
+    color: "#6b7280",
+    fontWeight: "600",
+  },
+  dropdownList: {
+    borderTopWidth: 1,
+    borderTopColor: "#e5e7eb",
+  },
+  dropdownItem: {
+    paddingVertical: 12,
+    paddingHorizontal: 14,
+    borderBottomWidth: 1,
+    borderBottomColor: "#e5e7eb",
+    backgroundColor: "#ffffff",
+  },
+  dropdownItemText: {
+    color: "#111827",
   },
   roleRow: {
     flexDirection: "row",
@@ -1278,6 +1483,38 @@ const styles = StyleSheet.create({
   listMeta: {
     color: "#4b5563",
     marginTop: 2,
+  },
+  table: {
+    borderWidth: 0.5,
+    borderColor: "#000000",
+    borderRadius: 12,
+    overflow: "hidden",
+    backgroundColor: "none",
+  },
+  tableRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    paddingVertical: 10,
+    paddingHorizontal: 12,
+    borderBottomWidth: 0.5,
+    borderBottomColor: "#000000",
+  },
+  tableHeaderRow: {
+    backgroundColor: "gray",
+  },
+  tableHeaderText: {
+    color: "#111827",
+    fontWeight: "700",
+  },
+  tableCell: {
+    color: "#111827",
+    flex: 1,
+  },
+  tableCellName: {
+    flex: 0.4,
+  },
+  tableCellShops: {
+    flex: 0.6,
   },
   hintCard: {
     backgroundColor: "#ffffff",
