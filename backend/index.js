@@ -9,6 +9,7 @@ app.use(express.json());
 
 const employeeRoutes = require("./routes/employee.route");
 const storeRoutes = require("./routes/store.route");
+const attendanceRoutes = require("./routes/attendance.route");
 
 mongoose
   .connect(process.env.MONGO_URI)
@@ -18,6 +19,7 @@ mongoose
 app.get("/", (req, res) => res.json({ message: "API running ✅" }));
 app.use("/", employeeRoutes);
 app.use("/", storeRoutes);
+app.use("/", attendanceRoutes);
 
 const PORT = process.env.PORT || 4000;
 app.listen(PORT, () =>

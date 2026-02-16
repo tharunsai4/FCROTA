@@ -159,46 +159,9 @@ router.post("/auth/bootstrap-director", async (req, res) => {
 
 // Register employee and issue token
 router.post("/auth/register", async (req, res) => {
-  try {
-    if (!process.env.JWT_SECRET) {
-      return res.status(500).json({ error: "JWT_SECRET not set" });
-    }
-
-    const { password, email, storeId, storeIds, ...rest } = req.body;
-    const inputStoreIds = normalizeStoreIds(storeId, storeIds);
-    if (!password || !email || inputStoreIds.length === 0) {
-      return res.status(400).json({
-        error: "Email, password, and storeId or storeIds required",
-      });
-    }
-
-    const stores = await resolveStores(inputStoreIds);
-    if (!stores) {
-      return res.status(400).json({ error: "Store not found" });
-    }
-
-    const normalizedEmail = String(email).trim().toLowerCase();
-    const existing = await Employee.findOne({ email: normalizedEmail });
-    if (existing) {
-      return res.status(409).json({ error: "Email already registered" });
-    }
-
-    const hashed = await bcrypt.hash(password, 10);
-    const employee = await Employee.create({
-      ...rest,
-      email: normalizedEmail,
-      role: "STAFF",
-      storeIds: stores.map((s) => s._id),
-      storeNames: stores.map((s) => s.name),
-      password: hashed,
-    });
-    await sendVerificationEmail(employee);
-    return res.status(201).json({
-      message: "Verification email sent. Please verify your email.",
-    });
-  } catch (err) {
-    return res.status(400).json({ error: err.message });
-  }
+  return res
+    .status(403)
+    .json({ error: "Sign up is disabled. Contact an admin." });
 });
 
 // Login and issue token
@@ -215,15 +178,10 @@ router.post("/auth/login", async (req, res) => {
 
     const normalizedEmail = String(email).trim().toLowerCase();
     const employee = await Employee.findOne({ email: normalizedEmail }).select(
-      "+password +isEmailVerified"
+      "+password"
     );
     if (!employee) {
       return res.status(401).json({ error: "Invalid credentials" });
-    }
-    if (employee.isEmailVerified === false) {
-      return res
-        .status(403)
-        .json({ error: "Email not verified. Check your email." });
     }
 
     const ok = await bcrypt.compare(password, employee.password);
@@ -435,7 +393,24 @@ router.patch("/auth/me", requireAuth, async (req, res) => {
 router.post("/employees", requireAuth, canManageEmployees, async (req, res) => {
   try {
     const { password, storeId, storeIds, ...rest } = req.body;
-    const role = rest.role || "STAFF";
+    const role = String(rest.role || "STAFF").toUpperCase();
+    const creatorRole = req.user?.role;
+    const allowedForDirector = [
+      "MANAGER",
+      "STAFF",
+      "STORE_MANAGER",
+      "SALES_EXECUTIVE",
+    ];
+    const allowedForManager = ["STAFF", "STORE_MANAGER", "SALES_EXECUTIVE"];
+    if (role === "DIRECTOR") {
+      return res.status(403).json({ error: "Cannot create director" });
+    }
+    if (creatorRole === "DIRECTOR" && !allowedForDirector.includes(role)) {
+      return res.status(403).json({ error: "Role not allowed" });
+    }
+    if (creatorRole === "MANAGER" && !allowedForManager.includes(role)) {
+      return res.status(403).json({ error: "Role not allowed" });
+    }
     const inputStoreIds = normalizeStoreIds(storeId, storeIds);
     if (!password) {
       return res.status(400).json({ error: "Password required" });
@@ -458,6 +433,7 @@ router.post("/employees", requireAuth, canManageEmployees, async (req, res) => {
     const hashed = await bcrypt.hash(password, 10);
     const createPayload = {
       ...rest,
+      role,
       password: hashed,
       isEmailVerified: true,
     };
