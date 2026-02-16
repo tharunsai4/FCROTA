@@ -34,7 +34,7 @@ const employeeSchema = new mongoose.Schema(
     },
     isEmailVerified: {
       type: Boolean,
-      default: false,
+      default: true,
     },
     emailVerifyToken: {
       type: String,

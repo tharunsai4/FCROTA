@@ -3,13 +3,6 @@ import { useEffect, useMemo, useState } from "react";
 const API_BASE = import.meta.env.VITE_API_BASE || "http://localhost:4000";
 
 const initialLogin = { email: "", password: "" };
-const initialSignup = {
-  fullName: "",
-  phone: "",
-  email: "",
-  password: "",
-  storeIds: [],
-};
 const initialStore = {
   name: "",
   address: "",
@@ -46,7 +39,6 @@ const App = () => {
   const [employees, setEmployees] = useState([]);
 
   const [loginForm, setLoginForm] = useState(initialLogin);
-  const [signupForm, setSignupForm] = useState(initialSignup);
   const [storeForm, setStoreForm] = useState(initialStore);
   const [employeeForm, setEmployeeForm] = useState(initialEmployee);
   const [assignForm, setAssignForm] = useState(initialAssign);
@@ -221,40 +213,6 @@ const App = () => {
       });
       if (data?.token) setToken(data.token);
       setLoginForm(initialLogin);
-    } catch (err) {
-      setAuthError(err.message);
-    }
-  };
-
-  const handleSignup = async (event) => {
-    event.preventDefault();
-    setAuthError("");
-    setAuthNotice("");
-
-    const { fullName, phone, email, password, storeIds } = signupForm;
-    if (!fullName || !phone || !email || !password) {
-      setAuthError("All fields are required.");
-      return;
-    }
-    if (storeIds.length === 0) {
-      setAuthError("Select at least one store.");
-      return;
-    }
-
-    try {
-      await apiFetch("/auth/register", {
-        method: "POST",
-        body: JSON.stringify({
-          fullName,
-          phone,
-          email,
-          password,
-          storeIds,
-        }),
-      });
-      setSignupForm(initialSignup);
-      setAuthNotice("Check your email to verify your account.");
-      setAuthMode("login");
     } catch (err) {
       setAuthError(err.message);
     }
@@ -452,23 +410,6 @@ const App = () => {
             </p>
           </div>
 
-          <div className="toggle">
-            <button
-              className={authMode === "login" ? "active" : ""}
-              onClick={() => setAuthMode("login")}
-              type="button"
-            >
-              Login
-            </button>
-            <button
-              className={authMode === "signup" ? "active" : ""}
-              onClick={() => setAuthMode("signup")}
-              type="button"
-            >
-              Sign Up
-            </button>
-          </div>
-
           {authMode === "login" ? (
             <form className="form" onSubmit={handleLogin}>
               <label>Email</label>
@@ -517,69 +458,6 @@ const App = () => {
               >
                 Forgot password?
               </button>
-            </form>
-          ) : authMode === "signup" ? (
-            <form className="form" onSubmit={handleSignup}>
-              <label>Full name</label>
-              <input
-                type="text"
-                value={signupForm.fullName}
-                onChange={(event) =>
-                  setSignupForm((prev) => ({
-                    ...prev,
-                    fullName: event.target.value,
-                  }))
-                }
-              />
-              <label>Phone</label>
-              <input
-                type="text"
-                value={signupForm.phone}
-                onChange={(event) =>
-                  setSignupForm((prev) => ({
-                    ...prev,
-                    phone: event.target.value,
-                  }))
-                }
-              />
-              <label>Email</label>
-              <input
-                type="email"
-                value={signupForm.email}
-                onChange={(event) =>
-                  setSignupForm((prev) => ({
-                    ...prev,
-                    email: event.target.value,
-                  }))
-                }
-              />
-              <label>Password</label>
-              <input
-                type="password"
-                value={signupForm.password}
-                onChange={(event) =>
-                  setSignupForm((prev) => ({
-                    ...prev,
-                    password: event.target.value,
-                  }))
-                }
-              />
-              <label>Stores (select multiple)</label>
-              <select
-                multiple
-                value={signupForm.storeIds}
-                onChange={(event) => {
-                  const selected = Array.from(event.target.selectedOptions).map(
-                    (opt) => opt.value
-                  );
-                  setSignupForm((prev) => ({ ...prev, storeIds: selected }));
-                }}
-              >
-                {storeOptions}
-              </select>
-              {authError && <p className="error">{authError}</p>}
-              {authNotice && <p className="muted">{authNotice}</p>}
-              <button type="submit">Create Staff Account</button>
             </form>
           ) : (
             <form

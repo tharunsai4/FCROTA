@@ -21,13 +21,6 @@ const DEFAULT_API =
 const API_BASE = process.env.EXPO_PUBLIC_API_BASE || DEFAULT_API;
 
 const initialLogin = { email: "", password: "" };
-const initialSignup = {
-  fullName: "",
-  phone: "",
-  email: "",
-  password: "",
-  storeIds: [],
-};
 const initialStore = {
   name: "",
   address: "",
@@ -35,12 +28,12 @@ const initialStore = {
   email: "",
   isActive: true,
 };
-const initialEmployee = {
+  const initialEmployee = {
   fullName: "",
   phone: "",
   email: "",
   password: "",
-  role: "SALES_EXECUTIVE",
+  role: "STAFF",
   storeIds: [],
 };
 
@@ -65,9 +58,9 @@ const Field = ({ label, value, onChangeText, secure, placeholder }) => (
   </View>
 );
 
-const Section = ({ title, children }) => (
-  <View style={styles.section}>
-    <Text style={styles.sectionTitle}>{title}</Text>
+const Section = ({ title, children, style, titleStyle }) => (
+  <View style={[styles.section, style]}>
+    <Text style={[styles.sectionTitle, titleStyle]}>{title}</Text>
     {children}
   </View>
 );
@@ -107,10 +100,27 @@ export default function App() {
   const [employees, setEmployees] = useState([]);
   const [employeeStoreFilter, setEmployeeStoreFilter] = useState("");
   const [shopFilterOpen, setShopFilterOpen] = useState(false);
+  const [attendance, setAttendance] = useState({
+    dateKey: "",
+    totalMinutes: 0,
+    openShift: null,
+    shifts: [],
+  });
+  const [attendanceStoreId, setAttendanceStoreId] = useState("");
+  const [attendanceStoreOpen, setAttendanceStoreOpen] = useState(false);
+  const [clockTick, setClockTick] = useState(Date.now());
+  const [attendanceRange, setAttendanceRange] = useState("day");
+  const [attendanceSummary, setAttendanceSummary] = useState({
+    range: "day",
+    from: "",
+    to: "",
+    totalMinutes: 0,
+  });
+  const [staffStoreFilter, setStaffStoreFilter] = useState("");
+  const [staffStoreOpen, setStaffStoreOpen] = useState(false);
 
   const [loginForm, setLoginForm] = useState(initialLogin);
-  const [signupForm, setSignupForm] = useState(initialSignup);
-  // authMode: "login" | "signup" | "forgot"
+  // authMode: "login" | "forgot"
   const [forgotEmail, setForgotEmail] = useState("");
   const [showLoginPassword, setShowLoginPassword] = useState(false);
   const [storeForm, setStoreForm] = useState(initialStore);
@@ -130,7 +140,7 @@ export default function App() {
       { id: "everyone", label: "Home", show: !isStaffOnly },
       { id: "profile", label: "Profile", show: true },
       { id: "shops", label: "Shops", show: !isStaffOnly },
-       { id: "staff", label: "Staff", show: role === "DIRECTOR" },
+      { id: "staff", label: "Staff", show: role === "DIRECTOR" || role === "MANAGER" },
       { id: "settings", label: "Settings", show: true },
     ],
     [isStaffOnly, role]
@@ -179,8 +189,29 @@ export default function App() {
     setProfile(data);
   };
 
+  const loadAttendanceToday = async () => {
+    const data = await apiFetch("/attendance/today");
+    setAttendance(data || { dateKey: "", totalMinutes: 0, openShift: null, shifts: [] });
+    if (data?.openShift?.storeId && !attendanceStoreId) {
+      setAttendanceStoreId(String(data.openShift.storeId));
+    }
+  };
+
+  const loadAttendanceSummary = async (range = attendanceRange) => {
+    const data = await apiFetch(`/attendance/summary?range=${range}`);
+    setAttendanceSummary(
+      data || { range, from: "", to: "", totalMinutes: 0 }
+    );
+  };
+
   const loadAuthed = async () => {
-    await Promise.all([loadProfile(), loadStores(), loadEmployees()]);
+    await Promise.all([
+      loadProfile(),
+      loadStores(),
+      loadEmployees(),
+      loadAttendanceToday(),
+      loadAttendanceSummary(attendanceRange),
+    ]);
   };
 
   useEffect(() => {
@@ -209,6 +240,19 @@ export default function App() {
   }, [token]);
 
   useEffect(() => {
+    if (!token) return;
+    loadAttendanceSummary(attendanceRange).catch(() => {});
+  }, [attendanceRange, token]);
+
+  useEffect(() => {
+    if (!attendance?.openShift?.clockIn) return;
+    const id = setInterval(() => {
+      setClockTick(Date.now());
+    }, 1000);
+    return () => clearInterval(id);
+  }, [attendance?.openShift?.clockIn]);
+
+  useEffect(() => {
     const available = navItems.filter((item) => item.show);
     if (available.length === 0) return;
     if (!available.some((item) => item.id === activeNav)) {
@@ -220,6 +264,10 @@ export default function App() {
     current.includes(id)
       ? current.filter((item) => item !== id)
       : [...current, id];
+
+  const normalizePhone = (value = "") => value.replace(/\D/g, "");
+  const isValidPhone = (value = "") =>
+    /^\d{10}$/.test(normalizePhone(value));
 
   const handleLogin = async () => {
     if (!loginForm.email || !loginForm.password) {
@@ -235,29 +283,6 @@ export default function App() {
       setLoginForm(initialLogin);
     } catch (err) {
       Alert.alert("Login failed", err.message);
-    }
-  };
-
-  const handleSignup = async () => {
-    const { fullName, phone, email, password, storeIds } = signupForm;
-    if (!fullName || !phone || !email || !password) {
-      Alert.alert("Missing info", "All fields are required.");
-      return;
-    }
-    if (storeIds.length === 0) {
-      Alert.alert("Missing info", "Select at least one store.");
-      return;
-    }
-    try {
-      await apiFetch("/auth/register", {
-        method: "POST",
-        body: JSON.stringify({ fullName, phone, email, password, storeIds }),
-      });
-      setSignupForm(initialSignup);
-      setAuthMode("login");
-      Alert.alert("Verify email", "Check your email to verify your account.");
-    } catch (err) {
-      Alert.alert("Sign up failed", err.message);
     }
   };
 
@@ -300,6 +325,10 @@ export default function App() {
       Alert.alert("Missing info", "All fields are required.");
       return;
     }
+    if (!isValidPhone(phone)) {
+      Alert.alert("Invalid phone", "Phone number must be 10 digits.");
+      return;
+    }
     if (role !== "DIRECTOR" && storeIds.length === 0) {
       Alert.alert("Missing info", "Select at least one store.");
       return;
@@ -307,7 +336,10 @@ export default function App() {
     try {
       await apiFetch("/employees", {
         method: "POST",
-        body: JSON.stringify(employeeForm),
+        body: JSON.stringify({
+          ...employeeForm,
+          phone: normalizePhone(phone),
+        }),
       });
       setEmployeeForm(initialEmployee);
       await loadEmployees();
@@ -317,9 +349,17 @@ export default function App() {
   };
 
   const handleCreateStaff = async () => {
-    const { fullName, phone, email, password, storeIds } = staffForm;
+    const { fullName, phone, email, password, storeIds, role: targetRole } = staffForm;
     if (!fullName || !phone || !email || !password) {
       Alert.alert("Missing info", "All fields are required.");
+      return;
+    }
+    if (!isValidPhone(phone)) {
+      Alert.alert("Invalid phone", "Phone number must be 10 digits.");
+      return;
+    }
+    if (!staffRoleOptions.includes(targetRole)) {
+      Alert.alert("Invalid role", "Role not allowed.");
       return;
     }
     if (storeIds.length === 0) {
@@ -331,10 +371,10 @@ export default function App() {
         method: "POST",
         body: JSON.stringify({
           fullName,
-          phone,
+          phone: normalizePhone(phone),
           email,
           password,
-          role: "STAFF",
+          role: targetRole,
           storeIds,
         }),
       });
@@ -348,12 +388,16 @@ export default function App() {
   const handleUpdateProfile = async () => {
     const payload = {
       fullName: profileForm.fullName.trim(),
-      phone: profileForm.phone.trim(),
+      phone: normalizePhone(profileForm.phone),
       email: profileForm.email.trim(),
     };
 
     if (!payload.fullName || !payload.phone) {
       Alert.alert("Missing info", "Full name and phone are required.");
+      return;
+    }
+    if (!isValidPhone(payload.phone)) {
+      Alert.alert("Invalid phone", "Phone number must be 10 digits.");
       return;
     }
 
@@ -398,9 +442,15 @@ export default function App() {
   const storeOptions = useMemo(() => stores, [stores]);
   const employeeOptions = useMemo(() => employees, [employees]);
   const staffMembers = useMemo(
-    () => employees.filter((employee) => employee.role === "STAFF"),
+    () => employees.filter((employee) => employee.role !== "DIRECTOR"),
     [employees]
   );
+  const staffRoleOptions = useMemo(() => {
+    if (role === "DIRECTOR") {
+      return ["MANAGER", "STAFF", "STORE_MANAGER", "SALES_EXECUTIVE"];
+    }
+    return ["STAFF", "STORE_MANAGER", "SALES_EXECUTIVE"];
+  }, [role]);
   const storeNameById = useMemo(() => {
     const map = {};
     stores.forEach((store) => {
@@ -469,6 +519,15 @@ export default function App() {
     return [];
   };
 
+  const filteredStaffMembers = useMemo(() => {
+    if (!staffStoreFilter) return [];
+    const filterId = String(staffStoreFilter);
+    return staffMembers.filter((employee) => {
+      const ids = getEmployeeStoreIds(employee).map(String);
+      return ids.includes(filterId);
+    });
+  }, [staffMembers, staffStoreFilter, storeIdByName]);
+
   const filteredEmployees = useMemo(() => {
     if (!employeeStoreFilter) return employees;
     return employees.filter((employee) => {
@@ -477,11 +536,104 @@ export default function App() {
     });
   }, [employees, employeeStoreFilter, storeIdByName]);
 
+  const attendanceStoreOptions = useMemo(() => {
+    if (role === "DIRECTOR" || role === "MANAGER") return storeOptions;
+    const allowed = Array.isArray(profile?.storeIds)
+      ? profile.storeIds.map((id) => String(id))
+      : [];
+    return storeOptions.filter((store) =>
+      allowed.includes(String(store._id))
+    );
+  }, [role, profile, storeOptions]);
+
+  const selectedAttendanceStoreLabel = attendanceStoreId
+    ? storeNameById[attendanceStoreId] || "Select store"
+    : "Select store";
+  const selectedStaffStoreLabel = staffStoreFilter
+    ? storeNameById[staffStoreFilter] || "Selected store"
+    : "Select store";
+
+  const formatTime = (value) => {
+    if (!value) return "—";
+    const date = new Date(value);
+    if (Number.isNaN(date.getTime())) return "—";
+    return date.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+  };
+
+  const formatMinutes = (minutes) => {
+    const total = Number(minutes) || 0;
+    const hours = Math.floor(total / 60);
+    const mins = total % 60;
+    return hours > 0 ? `${hours}h ${mins}m` : `${mins}m`;
+  };
+
+  const formatDuration = (seconds) => {
+    const total = Math.max(0, Number(seconds) || 0);
+    const hours = Math.floor(total / 3600);
+    const minutes = Math.floor((total % 3600) / 60);
+    const secs = total % 60;
+    if (hours > 0) return `${hours}h ${minutes}m ${secs}s`;
+    return `${minutes}m ${secs}s`;
+  };
+
+  const liveTotalSeconds = useMemo(() => {
+    const baseMinutes = Number(attendance?.totalMinutes) || 0;
+    let seconds = baseMinutes * 60;
+    if (attendance?.openShift?.clockIn) {
+      const start = new Date(attendance.openShift.clockIn).getTime();
+      if (!Number.isNaN(start)) {
+        seconds += Math.max(0, Math.floor((clockTick - start) / 1000));
+      }
+    }
+    return seconds;
+  }, [attendance, clockTick]);
+
+  const handleClockIn = async () => {
+    if (!attendanceStoreId) {
+      Alert.alert("Missing info", "Select a store to clock in.");
+      return;
+    }
+    try {
+      await apiFetch("/attendance/clock-in", {
+        method: "POST",
+        body: JSON.stringify({ storeId: attendanceStoreId }),
+      });
+      await loadAttendanceToday();
+      Alert.alert("Clocked in", "Have a great shift.");
+    } catch (err) {
+      Alert.alert("Clock-in failed", err.message);
+    }
+  };
+
+  const handleClockOut = async () => {
+    if (!attendanceStoreId) {
+      Alert.alert("Missing info", "Select a store to clock out.");
+      return;
+    }
+    if (
+      attendance?.openShift?.storeId &&
+      String(attendance.openShift.storeId) !== String(attendanceStoreId)
+    ) {
+      Alert.alert("Store mismatch", "Select the same store you clocked in to.");
+      return;
+    }
+    try {
+      await apiFetch("/attendance/clock-out", {
+        method: "POST",
+        body: JSON.stringify({ storeId: attendanceStoreId }),
+      });
+      await loadAttendanceToday();
+      Alert.alert("Clocked out", "Shift closed.");
+    } catch (err) {
+      Alert.alert("Clock-out failed", err.message);
+    }
+  };
+
   if (!token) {
     return (
 
        
-
+<ScrollView>
       <ImageBackground
         source={require("./assets/logo.png")}
         style={styles.authBackground}
@@ -497,29 +649,6 @@ export default function App() {
             style={styles.logo}
             resizeMode="contain"
           />
-          {authMode !== "forgot" && (
-            <View style={styles.toggleRow}>
-              <Pressable
-                onPress={() => setAuthMode("login")}
-                style={[
-                  styles.toggleBtn,
-                  authMode === "login" && styles.toggleBtnActive,
-                ]}
-              >
-                <Text style={styles.toggleText}>Login</Text>
-              </Pressable>
-              <Pressable
-                onPress={() => setAuthMode("signup")}
-                style={[
-                  styles.toggleBtn,
-                  authMode === "signup" && styles.toggleBtnActive,
-                ]}
-              >
-                <Text style={styles.toggleText}>Sign Up</Text>
-              </Pressable>
-            </View>
-          )}
-
           {authMode === "login" ? (
             <View style={styles.card}>
               <Field
@@ -560,52 +689,6 @@ export default function App() {
                 <Text style={styles.linkText}>Forgot password?</Text>
               </Pressable>
             </View>
-          ) : authMode === "signup" ? (
-            <View style={styles.card}>
-              <Field
-                label="Full name"
-                value={signupForm.fullName}
-                onChangeText={(value) =>
-                  setSignupForm((prev) => ({ ...prev, fullName: value }))
-                }
-              />
-              <Field
-                label="Phone"
-                value={signupForm.phone}
-                onChangeText={(value) =>
-                  setSignupForm((prev) => ({ ...prev, phone: value }))
-                }
-              />
-              <Field
-                label="Email"
-                value={signupForm.email}
-                onChangeText={(value) =>
-                  setSignupForm((prev) => ({ ...prev, email: value }))
-                }
-              />
-              <Field
-                label="Password"
-                value={signupForm.password}
-                onChangeText={(value) =>
-                  setSignupForm((prev) => ({ ...prev, password: value }))
-                }
-                secure
-              />
-              <Text style={styles.label}>Select stores</Text>
-              <MultiSelect
-                items={storeOptions}
-                selected={signupForm.storeIds}
-                onToggle={(id) =>
-                  setSignupForm((prev) => ({
-                    ...prev,
-                    storeIds: toggleStoreSelection(prev.storeIds, id),
-                  }))
-                }
-              />
-              <Pressable style={styles.primaryBtn} onPress={handleSignup}>
-                <Text style={styles.primaryBtnText}>Create account</Text>
-              </Pressable>
-            </View>
           ) : (
             <View style={styles.card}>
               <Field
@@ -634,13 +717,15 @@ export default function App() {
           </View>
         </KeyboardAvoidingView>
       </ImageBackground>
+      </ScrollView>
     );
   }
 
   return (
     <ImageBackground
       source={require("./assets/logo.png")}
-      style={styles.authBackground}
+      style={styles.appBackground}
+      imageStyle={styles.appBackgroundImage}
       resizeMode="contain"
     >
       <View style={styles.appWrap}>
@@ -709,14 +794,22 @@ export default function App() {
 
       <ScrollView contentContainerStyle={styles.body}>
         {activeNav === "profile" && (
-          <Section title="Profile">
+          
+          <Section>
+            <Text style={styles.profileHead}>YOUR PROFILE</Text>
             <View style={styles.profileCard}>
+              <View style={styles.custInfo}>
+                <View >
               <Text style={styles.profileName}>{profile?.fullName}</Text>
               <Text style={styles.profileMeta}>{profile?.email}</Text>
+              <Text style={styles.profileMeta}>{profile?.phone || ""}</Text>
+              </View>
+              <Badge label={profile?.role || ""} />
+              </View>
               <View style={styles.profileRow}>
-                <Badge label={profile?.role || ""} />
-                <Text style={styles.profileMeta}>{profile?.phone || ""}</Text>
-                <View style={styles.profileRow}>
+              </View>
+              <View style={styles.profileRow}>
+                
                 <Text
                   style={
                     profile?.isActive === false
@@ -727,8 +820,6 @@ export default function App() {
                   {profile?.isActive === false ? "Inactive" : "Active"}
                 </Text>
               </View>
-              </View>
-              
               <Text style={styles.profileMeta}>Stores</Text>
               <Text style={styles.profileStores}>
                 {Array.isArray(profile?.storeNames) &&
@@ -737,6 +828,35 @@ export default function App() {
                   : "All stores"}
               </Text>
             </View>
+
+            <View style={styles.card}>
+              <Text style={styles.label}>Attendance Summary</Text>
+              <View style={styles.filterRow}>
+                {["day", "week", "month"].map((value) => (
+                  <Pressable
+                    key={value}
+                    onPress={() => setAttendanceRange(value)}
+                    style={[
+                      styles.toggleBtn,
+                      attendanceRange === value && styles.toggleBtnActive,
+                    ]}
+                  >
+                    <Text style={styles.toggleText}>
+                      {value.charAt(0).toUpperCase() + value.slice(1)}
+                    </Text>
+                  </Pressable>
+                ))}
+              </View>
+              <Text style={styles.profileMeta}>
+                Total hours: {formatMinutes(attendanceSummary?.totalMinutes)}
+              </Text>
+              {attendanceSummary?.from && attendanceSummary?.to && (
+                <Text style={styles.profileMeta}>
+                  Range: {attendanceSummary.from} to {attendanceSummary.to}
+                </Text>
+              )}
+            </View>
+            
             <View style={styles.card}>
               <Field
                 label="Full name"
@@ -888,117 +1008,121 @@ export default function App() {
         )} */}
 
         {activeNav === "everyone" && !isStaffOnly && (
-          <Section title="Employee List">
-            <Text style={styles.label}>Filter by shop</Text>
-            <View style={styles.dropdown}>
-              <Pressable
-                style={styles.dropdownHeader}
-                onPress={() => setShopFilterOpen((prev) => !prev)}
-              >
-                <Text style={styles.dropdownHeaderText}>
-                  {selectedShopLabel}
-                </Text>
-                <Text style={styles.dropdownChevron}>
-                  {shopFilterOpen ? "^" : "v"}
-                </Text>
-              </Pressable>
-              {shopFilterOpen && (
-                <View style={styles.dropdownList}>
-                  <Pressable
-                    style={styles.dropdownItem}
-                    onPress={() => {
-                      setEmployeeStoreFilter("");
-                      setShopFilterOpen(false);
-                    }}
-                  >
-                    <Text style={styles.dropdownItemText}>All shops</Text>
-                  </Pressable>
-                  {storeOptions.map((store) => (
-                    <Pressable
-                      key={store._id}
-                      style={styles.dropdownItem}
-                      onPress={() => {
-                        setEmployeeStoreFilter(store._id);
-                        setShopFilterOpen(false);
-                      }}
-                    >
-                      <Text style={styles.dropdownItemText}>{store.name}</Text>
-                    </Pressable>
-                  ))}
-                </View>
-              )}
-            </View>
-            <View style={styles.table}>
-              <View style={[styles.tableRow, styles.tableHeaderRow]}>
-                <Text style={[styles.tableHeaderText, styles.tableCellName]}>
-                  Name
-                </Text>
-                <Text style={[styles.tableHeaderText, styles.tableCellShops]}>
-                  Shops
-                </Text>
-              </View>
-              {filteredEmployees.length === 0 ? (
-                <View style={styles.tableRow}>
-                  <Text style={styles.tableCell}>
-                    {employeeStoreFilter
-                      ? "No employees for selected shop(s)"
-                      : "No employees found"}
-                  </Text>
-                </View>
-              ) : (
-                filteredEmployees.map((employee) => (
-                  <View key={employee._id} style={styles.tableRow}>
-                    <Text style={[styles.tableCell, styles.tableCellName]}>
-                      {employee.fullName}
-                    </Text>
-                    <Text style={[styles.tableCell, styles.tableCellShops]}>
-                      {getEmployeeStoreLabel(employee)}
-                    </Text>
-                  </View>
-                ))
-              )}
-            </View>
-          </Section>
-        )}
-        
-        {activeNav === "everyone" && !isStaffOnly && canManageEmployees && (
-          <Section title="Assign stores">
+          <Section title="">
             <View style={styles.card}>
-              <Text style={styles.label}>Employee</Text>
-              <View style={styles.multiSelect}>
-                {employeeOptions.map((employee) => (
-                  <Pressable
-                    key={employee._id}
-                    onPress={() => setAssignEmployeeId(employee._id)}
-                    style={[
-                      styles.selectItem,
-                      assignEmployeeId === employee._id &&
-                        styles.selectItemActive,
-                    ]}
-                  >
-                    <Text style={styles.selectText}>{employee.fullName}</Text>
-                    <Text style={styles.selectMeta}>{employee.role}</Text>
-                  </Pressable>
-                ))}
+              <Text style={styles.profileMeta}>
+                {attendance?.openShift
+                  ? `Clocked in at ${formatTime(attendance.openShift.clockIn)}`
+                  : "Not clocked in"}
+              </Text>
+              <Text style={styles.profileMeta}>
+                Today total: {formatDuration(liveTotalSeconds)}
+              </Text>
+              <View style={styles.dropdown}>
+                <Pressable
+                  style={styles.dropdownHeader}
+                  onPress={() => setAttendanceStoreOpen((prev) => !prev)}
+                >
+                  <Text style={styles.dropdownHeaderText}>
+                    {selectedAttendanceStoreLabel}
+                  </Text>
+                  <Text style={styles.dropdownChevron}>
+                    {attendanceStoreOpen ? "^" : "v"}
+                  </Text>
+                </Pressable>
+                {attendanceStoreOpen && (
+                  <View style={styles.dropdownList}>
+                    {attendanceStoreOptions.length === 0 ? (
+                      <View style={styles.dropdownItem}>
+                        <Text style={styles.dropdownItemText}>
+                          No stores available
+                        </Text>
+                      </View>
+                    ) : (
+                      attendanceStoreOptions.map((store) => (
+                        <Pressable
+                          key={store._id}
+                          style={styles.dropdownItem}
+                          onPress={() => {
+                            setAttendanceStoreId(store._id);
+                            setAttendanceStoreOpen(false);
+                          }}
+                        >
+                          <Text style={styles.dropdownItemText}>
+                            {store.name}
+                          </Text>
+                        </Pressable>
+                      ))
+                    )}
+                  </View>
+                )}
               </View>
-              <Text style={styles.label}>Stores</Text>
-              <MultiSelect
-                items={storeOptions}
-                selected={assignStoreIds}
-                onToggle={(id) =>
-                  setAssignStoreIds((prev) => toggleStoreSelection(prev, id))
-                }
-              />
               <Pressable
                 style={styles.primaryBtn}
-                onPress={handleAssignStores}
+                onPress={
+                  attendance?.openShift ? handleClockOut : handleClockIn
+                }
               >
-                <Text style={styles.primaryBtnText}>Save assignment</Text>
+                <Text style={styles.primaryBtnText}>
+                  {attendance?.openShift ? "Clock out" : "Clock in"}
+                </Text>
               </Pressable>
+              <View style={styles.table}>
+                <View style={[styles.tableRow, styles.tableHeaderRow]}>
+                  <Text
+                    style={[styles.tableHeaderText, styles.tableCellStore]}
+                  >
+                    Store
+                  </Text>
+                  <Text
+                    style={[styles.tableHeaderText, styles.tableCellTime]}
+                  >
+                    In
+                  </Text>
+                  <Text
+                    style={[styles.tableHeaderText, styles.tableCellTime]}
+                  >
+                    Out
+                  </Text>
+                  <Text
+                    style={[styles.tableHeaderText, styles.tableCellMinutes]}
+                  >
+                    Total
+                  </Text>
+                </View>
+                {attendance?.shifts?.length > 0 ? (
+                  attendance.shifts.map((shift) => (
+                    <View key={shift._id} style={styles.tableRow}>
+                      <Text style={[styles.tableCell, styles.tableCellStore]}>
+                        {storeNameById[String(shift.storeId)] || "Store"}
+                      </Text>
+                      <Text style={[styles.tableCell, styles.tableCellTime]}>
+                        {formatTime(shift.clockIn)}
+                      </Text>
+                      <Text style={[styles.tableCell, styles.tableCellTime]}>
+                        {shift.clockOut ? formatTime(shift.clockOut) : "—"}
+                      </Text>
+                      <Text
+                        style={[styles.tableCell, styles.tableCellMinutes]}
+                      >
+                        {shift.clockOut
+                          ? formatMinutes(shift.totalMinutes)
+                          : "—"}
+                      </Text>
+                    </View>
+                  ))
+                ) : (
+                  <View style={styles.tableRow}>
+                    <Text style={styles.tableCell}>No shifts today</Text>
+                  </View>
+                )}
+              </View>
             </View>
           </Section>
         )}
 
+
+        
         {activeNav === "shops" && !isStaffOnly && (
           <Section title="Stores">
             <FlatList
@@ -1020,27 +1144,60 @@ export default function App() {
 
         
 
-        {activeNav === "staff" && role === "DIRECTOR" && (
+        {activeNav === "staff" && (role === "DIRECTOR" || role === "MANAGER") && (
           <Section title="Staff">
-            <FlatList
-              data={staffMembers}
-              scrollEnabled={false}
-              keyExtractor={(item) => item._id}
-              renderItem={({ item }) => (
-                <View style={styles.staffListItem}>
-                  <Text style={styles.listTitle}>{item.fullName}</Text>
-                  <Text style={styles.listMeta}>{item.email || "No email"}</Text>
-                  <Text style={styles.listMeta}>
-                    Stores: {item.storeNames?.join(", ") || "None"}
-                  </Text>
+            <Text style={styles.label}>Filter by store</Text>
+            <View style={styles.dropdown}>
+              <Pressable
+                style={styles.dropdownHeader}
+                onPress={() => setStaffStoreOpen((prev) => !prev)}
+              >
+                <Text style={styles.dropdownHeaderText}>
+                  {selectedStaffStoreLabel}
+                </Text>
+                <Text style={styles.dropdownChevron}>
+                  {staffStoreOpen ? "^" : "v"}
+                </Text>
+              </Pressable>
+              {staffStoreOpen && (
+                <View style={styles.dropdownList}>
+                  {storeOptions.map((store) => (
+                    <Pressable
+                      key={store._id}
+                      style={styles.dropdownItem}
+                      onPress={() => {
+                        setStaffStoreFilter(String(store._id));
+                        setStaffStoreOpen(false);
+                      }}
+                    >
+                      <Text style={styles.dropdownItemText}>{store.name}</Text>
+                    </Pressable>
+                  ))}
                 </View>
               )}
-              ListEmptyComponent={
-                <Text style={styles.listMeta}>No staff found.</Text>
-              }
-            />
+            </View>
+            {staffStoreFilter ? (
+              <FlatList
+                data={filteredStaffMembers}
+                scrollEnabled={false}
+                keyExtractor={(item) => item._id}
+                renderItem={({ item }) => (
+                  <View style={styles.staffListItem}>
+                    <Text style={styles.listTitle}>{item.fullName}</Text>
+                    <Text style={styles.listMeta}>
+                      Stores: {item.storeNames?.join(", ") || "None"}
+                    </Text>
+                  </View>
+                )}
+                ListEmptyComponent={
+                  <Text style={styles.listMeta}>No staff for this store.</Text>
+                }
+              />
+            ) : null}
             <View style={styles.card}>
-              <Text style={styles.label}>Create staff</Text>
+              <Text style={styles.label}>
+                {role === "DIRECTOR" ? "Create staff or manager" : "Create staff"}
+              </Text>
               <Field
                 label="Full name"
                 value={staffForm.fullName}
@@ -1070,6 +1227,23 @@ export default function App() {
                 }
                 secure
               />
+              <Text style={styles.label}>Role</Text>
+              <View style={styles.roleRow}>
+                {staffRoleOptions.map((value) => (
+                  <Pressable
+                    key={value}
+                    onPress={() =>
+                      setStaffForm((prev) => ({ ...prev, role: value }))
+                    }
+                    style={[
+                      styles.roleChip,
+                      staffForm.role === value && styles.roleChipActive,
+                    ]}
+                  >
+                    <Text style={styles.roleText}>{value}</Text>
+                  </Pressable>
+                ))}
+              </View>
               <Text style={styles.label}>Stores</Text>
               <MultiSelect
                 items={storeOptions}
@@ -1118,6 +1292,14 @@ const styles = StyleSheet.create({
     width:100,
     alignSelf: "center",
   },
+  profileHead:{
+    display: "flex",
+    alignItems:"center",
+    justifyContent:"center",
+    fontSize: 30,
+    fontWeight:"bold",
+    color:"#919191"
+  },
   mainView:{
     marginTop: 70
   },
@@ -1146,14 +1328,13 @@ const styles = StyleSheet.create({
     backgroundColor: "rgba(255, 255, 255, 0.92)",
   },
   body: {
-    padding: 20,
+    paddingHorizontal: 20,
     gap: 18,
     paddingBottom: 80,
   },
   header: {
     paddingTop: 56,
     paddingHorizontal: 20,
-    paddingBottom: 16,
     flexDirection: "row",
     justifyContent: "space-between",
     alignItems: "center",
@@ -1237,12 +1418,13 @@ const styles = StyleSheet.create({
     flex: 1,
     paddingVertical: 10,
     borderRadius: 10,
+    backgroundColor:"white",
     borderWidth: 1,
     borderColor: "#d1d5db",
     alignItems: "center",
   },
   toggleBtnActive: {
-    backgroundColor: "#f3f4f6",
+    backgroundColor: "#d8a1a1",
   },
   toggleText: {
     color: "#111827",
@@ -1345,8 +1527,8 @@ const styles = StyleSheet.create({
     fontWeight: "600",
   },
   profileCard: {
-    backgroundColor: "#ffffff",
-    borderRadius: 16,
+    backgroundColor: "#65b2eb",
+    borderRadius: 10,
     padding: 16,
     gap: 8,
     borderWidth: 1,
@@ -1360,6 +1542,12 @@ const styles = StyleSheet.create({
   profileMeta: {
     color: "#4b5563",
   },
+  custInfo:{
+    flexDirection:"row",
+    alignItems:"center",
+    justifyContent:"space-between"
+  },
+
   profileRow: {
     flexDirection: "row",
     alignItems: "center",
@@ -1442,6 +1630,11 @@ const styles = StyleSheet.create({
     flexWrap: "wrap",
     gap: 8,
   },
+  filterRow: {
+    flexDirection: "row",
+    gap: 8,
+    marginTop: 8,
+  },
   roleChip: {
     borderWidth: 1,
     borderColor: "#d1d5db",
@@ -1470,7 +1663,7 @@ const styles = StyleSheet.create({
     borderRadius: 14,
     padding: 12,
     marginBottom: 8,
-    borderWidth: 2,
+    borderWidth: 0,
     borderColor: "#000000",
   },
   listItemPressed: {
@@ -1515,6 +1708,16 @@ const styles = StyleSheet.create({
   },
   tableCellShops: {
     flex: 0.6,
+  },
+  tableCellStore: {
+    flex: 0.45,
+  },
+  tableCellTime: {
+    flex: 0.18,
+  },
+  tableCellMinutes: {
+    flex: 0.19,
+    textAlign: "right",
   },
   hintCard: {
     backgroundColor: "#ffffff",
